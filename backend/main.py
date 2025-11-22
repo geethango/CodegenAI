@@ -395,22 +395,28 @@ async def update_wireframe(project_id: str = Form(...), wireframe: str = Form(..
         if not project:
             return {"success": False, "error": "Project not found"}
 
+        # Existing wireframe object
         old_wf = project.get("wireframe", {})
 
-        # ONLY UPDATE STYLE VALUES
-        old_wf.update({
-           "layout_type": new_data.get("layout_type", old_wf.get("layout_type")),
-           "color_scheme": new_data.get("color_scheme", old_wf.get("color_scheme")),
-           "primary_color": new_data.get("primary_color", old_wf.get("primary_color")),
-           "app_name": new_data.get("app_name", old_wf.get("app_name"))
-        })
+        # --- Update only 3 customizable fields ---
+        old_wf["layout_type"] = new_data.get("layout_type", old_wf.get("layout_type"))
+        old_wf["color_scheme"] = new_data.get("color_scheme", old_wf.get("color_scheme"))
+        old_wf["primary_color"] = new_data.get("primary_color", old_wf.get("primary_color"))
+
+        # --- ROOT UI fields MUST also be updated ---
+        backend_updates = {
+            "ui_layout": old_wf["layout_type"],
+            "ui_color_scheme": old_wf["color_scheme"],
+            "ui_primary_color": old_wf["primary_color"],
+            "wireframe": old_wf
+        }
 
         await collection.update_one(
             {"_id": oid},
-            {"$set": {"wireframe": old_wf}}
+            {"$set": backend_updates}
         )
 
-        return {"success": True, "message": "Wireframe updated (merged)"}
+        return {"success": True, "message": "Wireframe updated"}
 
     except Exception as e:
         return {"success": False, "error": str(e)}
