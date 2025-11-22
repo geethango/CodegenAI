@@ -949,10 +949,7 @@
                                     <input type="color" id="primary-color" value="#4361ee">
                                 </div>
 
-                                <div class="edit-control">
-                                    <label for="app-name">Application Name</label>
-                                    <input type="text" id="app-name">
-                                </div>
+
 
                                 <div class="edit-control">
                                     <label>Modules</label>
@@ -1175,7 +1172,7 @@
         const BACKEND_URL = "http://127.0.0.1:8000";
         let selectedWireframePage = null;
         let lastWireframe = {};           // ✅ REQUIRED FIX
-        let currentWireframe = null;      // optional but recommended
+        let currentWireframe = {};      // optional but recommended
         let currentProjectId = null;      // required in updateWireframe()
         function normalizeNavText(str) {
             return str
@@ -1711,17 +1708,7 @@
 
 
 
-                document.getElementById("app-name").value =
-                    w.app_name || lastWireframe.app_name || "";
 
-                document.getElementById("layout-type").value =
-                    w.layout_type || lastWireframe.layout_type || "sidebar";
-
-                document.getElementById("primary-color").value =
-                    w.primary_color || lastWireframe.primary_color || "#4361ee";
-
-                document.getElementById("color-scheme").value =
-                    w.color_scheme || lastWireframe.color_scheme || "blue";
 
                 const safeSet = (id, value) => {
                     const el = document.getElementById(id);
@@ -1729,23 +1716,55 @@
                 };
 
 
-                safeSet("layout-type", lastWireframe.layout_type || "sidebar");
-                safeSet("primary-color", lastWireframe.primary_color || "#4361ee");
-                safeSet("color-scheme", lastWireframe.color_scheme || "blue");
+
 
                 // Select first module by default
                 if (!selectedWireframePage && w.navigation?.length) {
                     selectedWireframePage = w.navigation[0].id;
                 }
 
-                // Render Preview (uses the robust renderer below)
-                renderAIWireframePreview(w);
+
+
 
                 // Show the wireframe section
                 document.getElementById("wireframe-container").style.display = "grid";
 
                 // Move user to Step 3
                 goToStep(3);
+                // document.getElementById("app-name").value =
+                //     w.app_name || lastWireframe.app_name || "";
+
+                const layoutSelect = document.getElementById("layout-type");
+                if (layoutSelect) {
+                    layoutSelect.value =
+                        w.layout_type ||
+                        data.project.ui_layout ||        // ← NEW!
+                        lastWireframe.layout_type ||
+                        "sidebar";
+                }
+
+                const colorSelect = document.getElementById("color-scheme");
+                if (colorSelect) {
+                    colorSelect.value =
+                        w.color_scheme ||
+                        data.project.ui_color_scheme ||  // ← NEW!
+                        lastWireframe.color_scheme ||
+                        "blue";
+                }
+
+                const primaryInput = document.getElementById("primary-color");
+                if (primaryInput) {
+                    primaryInput.value =
+                        w.primary_color ||
+                        data.project.ui_primary_color || // ← NEW!
+                        lastWireframe.primary_color ||
+                        "#4361ee";
+                }
+
+
+
+                // Render Preview (uses the robust renderer below)
+                renderAIWireframePreview(w);
 
             } catch (err) {
                 console.error("Wireframe Error:", err);
@@ -1874,9 +1893,13 @@
             preview.innerHTML = "";
 
             const pages = w.pages || {};
+            // FIX: match navigation ID to pages EXACTLY
             const currId = selectedWireframePage || Object.keys(pages)[0];
-            const safeId = (currId || "").toLowerCase().replace(/[^a-z0-9]+/g, "_");
-            const page = pages[safeId];
+
+            // If backend key has _ but nav has -, convert nav → backend format
+            const fixedId = currId.replace(/-/g, "_");
+
+            const page = pages[fixedId];
 
             if (!page) {
                 preview.innerHTML = "<p>No module selected</p>";
@@ -1964,12 +1987,12 @@
         `;
             }
 
-            applyAppNameToPreview(w.app_name, w);
+
 
             // Set LAYOUT first
             preview.innerHTML = layoutHTML;
 
-            
+
 
             // Then fill PAGE content
             const pageArea = document.getElementById("pageArea");
@@ -2042,72 +2065,75 @@
         }
 
 
-        document.getElementById("layout-type").addEventListener("change", () => {
-            currentWireframe.layout_type = document.getElementById("layout-type").value;
-            renderAIWireframePreview(currentWireframe);
-        });
+        const layoutSelect = document.getElementById("layout-type");
+        if (layoutSelect) {
+            layoutSelect.addEventListener("change", () => {
+                if (!currentWireframe) return;
+                if (!currentWireframe) {
+                    console.error("❌ currentWireframe is NULL — stopping update.");
+                    return;
+                }
+                if (layoutSelect) {
+                    currentWireframe.layout_type = layoutSelect.value;
+                }
+                renderAIWireframePreview(currentWireframe);
+            });
+        }
 
         document.getElementById("primary-color").addEventListener("input", () => {
             currentWireframe.primary_color = document.getElementById("primary-color").value;
             renderAIWireframePreview(currentWireframe);
         });
 
-        document.getElementById("app-name").addEventListener("input", () => {
-            currentWireframe.app_name = document.getElementById("app-name").value;
-            applyAppNameToPreview(currentWireframe.app_name, currentWireframe);
-        });
+
 
         async function updateWireframe() {
             const layoutType = document.getElementById("layout-type").value;
             const colorScheme = document.getElementById("color-scheme").value;
             const primaryColor = document.getElementById("primary-color").value;
-            const appName = document.getElementById("app-name").value;
 
             applyColorScheme(colorScheme);
 
             document.getElementById("updateLoader").style.display = "block";
 
+            // 🔥 REAL FIX — MERGE, DO NOT OVERWRITE
             const updatedWireframe = {
+                ...currentWireframe,            // keep all pages, nav, components, app_name
                 layout_type: layoutType,
                 color_scheme: colorScheme,
                 primary_color: primaryColor,
-                app_name: appName
             };
 
             const fd = new FormData();
             fd.append("project_id", currentProjectId);
             fd.append("wireframe", JSON.stringify(updatedWireframe));
 
-            // ✔ Save to MongoDB
             await fetch(`${BACKEND_URL}/api/update-wireframe`, {
                 method: "POST",
                 body: fd
             });
 
-            // ✔ RELOAD the updated wireframe from DB
+            // Refetch fresh copy
             const refetch = await fetch(`${BACKEND_URL}/api/get-latest-project`);
             const latest = await refetch.json();
 
             if (latest.success) {
-                // update local object
-                window.currentWireframe = latest.project.wireframe;
-                window.lastWireframe = latest.project.wireframe;
+                currentWireframe = {
+                    ...latest.project.wireframe,
+                    layout_type: latest.project.ui_layout,            // ← root
+                    color_scheme: latest.project.ui_color_scheme,     // ← root
+                    primary_color: latest.project.ui_primary_color    // ← root
+                };
 
-                // update preview instantly
-                renderAIWireframePreview(window.currentWireframe);
-
-                // update style live
-                document.documentElement.style.setProperty("--primary", latest.project.wireframe.primary_color);
-
-                // update app name on preview (if shown)
-                applyAppNameToPreview(
-                    latest.project.wireframe.app_name,
-                    latest.project.wireframe
-                );
+                lastWireframe = { ...currentWireframe };
+                renderAIWireframePreview(currentWireframe);
+                document.documentElement.style.setProperty("--primary", primaryColor);
             }
 
             document.getElementById("updateLoader").style.display = "none";
         }
+
+
 
 
 
@@ -2136,25 +2162,15 @@
                     return;
                 }
 
-                const wireframe = {
-                    title: document.getElementById("app-name").value,
+                const updatedWireframe = {
                     layout_type: document.getElementById("layout-type").value,
-
-                    navigation: lastWireframe.navigation,
-
-                    pages: window.currentWireframe?.pages || [],
-
-                    style: {
-                        primary_color: document.getElementById("primary-color").value,
-                        color_scheme: document.getElementById("color-scheme").value,
-                        customizable: true
-                    }
+                    color_scheme: document.getElementById("color-scheme").value,
+                    primary_color: document.getElementById("primary-color").value
                 };
-
                 // 4️⃣ Send to backend to update MongoDB
                 const formData = new FormData();
                 formData.append("project_id", projectId);
-                formData.append("wireframe", JSON.stringify(wireframe));
+                formData.append("wireframe", JSON.stringify(updatedWireframe));
 
                 try {
                     const res = await fetch(`${BACKEND_URL}/api/update-wireframe`, {
