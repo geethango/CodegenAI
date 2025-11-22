@@ -22,48 +22,53 @@ OLLAMA_MODEL = "llama3:8b"
 # -------------------------------------------------------------------
 
 PROMPT_TEMPLATE = """
-You are a senior UI/UX engineer.
+You are a senior UI/UX engineer and a JSON-only generator.
 
-Your task:
-➡ Convert every MODULE into a PAGE.
-➡ Convert module fields → INPUT components.
-➡ Convert module actions → BUTTON components.
+TASK:
+• Convert each MODULE into one or more PAGES (pages grouped logically).
+• Use module fields → INPUT components.
+• Use module actions → BUTTON components.
+• Group related actions into sensible pages (example: Login flow → login, otp_verification, register, password_recovery).
+• For each input, choose an appropriate inputType (text, email, password, tel, date, number, file, textarea, checkbox, select).
+• For each action button, produce an action slug (lowercase, underscore).
 
-IMPORTANT:
-- Backend will generate layout, navigation, app_name.
-- DO NOT include layout_type, app_name, navigation, colors.
-- You ONLY generate the PAGES section.
+IMPORTANT OUTPUT RULES:
+• Output ONLY valid JSON — no text, no markdown, no explanation.
+• Keep layout, navigation, app_name, colors OUT of the output (backend will add them).
+• Structure: nested pages under each module slug; each module can contain multiple page objects.
 
-OUTPUT JSON SCHEMA (required):
+REQUIRED JSON SCHEMA:
 
 {{
   "pages": {{
     "<module_slug>": {{
-      "title": "<module name>",
-      "components": [
-        {{
-          "type": "input",
-          "label": "<field name>",
-          "inputType": "text"
-        }},
-        {{
-          "type": "button",
-          "label": "<action name>",
-          "action": "<action_slug>"
-        }}
-      ]
+      "<page_slug>": {{
+        "title": "<Page Title>",
+        "description": "<short description (optional)>",
+        "components": [
+          {{ "type": "input",  "label": "Email",       "name": "email",  "inputType": "email", "required": true }},
+          {{ "type": "input",  "label": "Mobile",      "name": "mobile", "inputType": "tel" }},
+          {{ "type": "select", "label": "User Type",   "name": "user_type", "options": ["Customer","Restaurant","Delivery","Admin"] }},
+          {{ "type": "button", "label": "Send OTP",    "action": "send_otp" }},
+          {{ "type": "button", "label": "Login",       "action": "login" }}
+        ]
+      }}
     }}
   }}
 }}
 
-Rules:
-- Keep ONLY this "pages" object in output.
-- No markdown, no explanations, no extra text.
-- Output valid JSON only.
+ADDITIONAL GUIDELINES:
+• Page slugs and action slugs must be lowercase, use underscore, no spaces.
+• If actions belong to a flow (OTP, Login), create separate pages (otp_verification, login, register) rather than dumping everything into a single page.
+• Keep components order logical: inputs first, then action buttons.
+• If a field looks like email/mobile/password, use respective inputType.
+• If an action implies a secondary modal (edit/delete), still represent it as a button component with proper action slug.
+• Keep pages minimal and user-friendly: split complex admin modules into a "list" page plus "detail/edit" page.
 
-PROJECT INPUT:
+PROJECT:
 {project_json}
 """
+
 
 
 

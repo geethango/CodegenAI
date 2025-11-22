@@ -1418,20 +1418,24 @@
         }
 
         function loadModuleDropdown(wireframe) {
-            const nav = wireframe.navigation || [];
             const select = document.getElementById("moduleSelect");
-
             select.innerHTML = "";
 
-            nav.forEach(item => {
-                const opt = document.createElement("option");
-                opt.value = item.id;
-                opt.textContent = item.label || item.id;
-                select.appendChild(opt);
+            const pages = wireframe.pages || {};
+
+            // Build dropdown for Module → SubPage
+            Object.entries(pages).forEach(([moduleSlug, subpages]) => {
+                Object.keys(subpages).forEach(pageSlug => {
+                    const opt = document.createElement("option");
+                    opt.value = moduleSlug + "|" + pageSlug;
+                    opt.textContent = `${moduleSlug} → ${pageSlug}`;
+                    select.appendChild(opt);
+                });
             });
 
-            if (!selectedWireframePage && nav.length) {
-                selectedWireframePage = nav[0].id;
+            // Set default selected page
+            if (!selectedWireframePage && select.options.length > 0) {
+                selectedWireframePage = select.options[0].value;
             }
 
             select.onchange = e => {
@@ -1439,6 +1443,7 @@
                 renderAIWireframePreview(wireframe);
             };
         }
+
 
         function renderModuleEditor(modules) {
             const container = document.getElementById("module-editor");
@@ -1691,10 +1696,16 @@
                 const layoutType = w.layout_type || w.layout?.type || w.ui_layout || "sidebar";
                 const primaryColor = w.primary_color || w.primaryColor || w.layout?.primary_color || "#4361ee";
                 const colorScheme = w.color_scheme || w.colorScheme || "blue";
-                const nav = Object.keys(w.pages || {}).map(pid => ({
-                    id: pid,
-                    label: w.pages[pid].title || pid
-                }));
+                const nav = [];
+
+                Object.entries(w.pages || {}).forEach(([moduleSlug, subpages]) => {
+                    Object.keys(subpages).forEach(pageSlug => {
+                        nav.push({
+                            id: moduleSlug + "|" + pageSlug,
+                            label: moduleSlug + " → " + pageSlug
+                        });
+                    });
+                });
                 w.navigation = nav;
 
                 // Navigation text for change-detection
@@ -1899,7 +1910,8 @@
             // If backend key has _ but nav has -, convert nav → backend format
             const fixedId = currId.replace(/-/g, "_");
 
-            const page = pages[fixedId];
+            const [moduleSlug, pageSlug] = selectedWireframePage.split("|");
+            const page = pages[moduleSlug]?.[pageSlug];
 
             if (!page) {
                 preview.innerHTML = "<p>No module selected</p>";
