@@ -26,51 +26,55 @@ You are a senior UI/UX engineer and a JSON-only generator.
 
 TASK:
 • Convert each MODULE into one or more PAGES (pages grouped logically).
-• Use module fields → INPUT components.
-• Use module actions → BUTTON components.
-• Group related actions into sensible pages (example: Login flow → login, otp_verification, register, password_recovery).
-• For each input, choose an appropriate inputType (text, email, password, tel, date, number, file, textarea, checkbox, select).
-• For each action button, produce an action slug (lowercase, underscore).
+• Convert module fields → INPUT components.
+• Convert module actions → BUTTON components.
+• Group related actions into logical pages (login, otp_verification, register, password_recovery).
+• Choose correct inputType based on label (email, password, tel, date, number, file, select, textarea).
+• Output JSON ONLY.
 
-IMPORTANT OUTPUT RULES:
-• Output ONLY valid JSON — no text, no markdown, no explanation.
-• Keep layout, navigation, app_name, colors OUT of the output (backend will add them).
-• Structure: nested pages under each module slug; each module can contain multiple page objects.
+IMPORTANT RULES:
+• Output ONLY valid JSON — no text, no markdown.
+• Do NOT include layout, navigation, app_name, colors.
+• Pages must be nested under module slug.
+• Use lowercase_with_underscores for all slugs.
 
-REQUIRED JSON SCHEMA:
+REQUIRED JSON SCHEMA EXAMPLE:
 
 {{
   "pages": {{
     "<module_slug>": {{
       "<page_slug>": {{
         "title": "<Page Title>",
-        "description": "<short description (optional)>",
+        "description": "",
         "components": [
-          {{ "type": "input",  "label": "Email",       "name": "email",  "inputType": "email", "required": true }},
-          {{ "type": "input",  "label": "Mobile",      "name": "mobile", "inputType": "tel" }},
-          {{ "type": "select", "label": "User Type",   "name": "user_type", "options": ["Customer","Restaurant","Delivery","Admin"] }},
-          {{ "type": "button", "label": "Send OTP",    "action": "send_otp" }},
-          {{ "type": "button", "label": "Login",       "action": "login" }}
+          {{
+            "type": "input",
+            "label": "Email",
+            "name": "email",
+            "inputType": "email",
+            "required": true
+          }},
+          {{
+            "type": "button",
+            "label": "Login",
+            "action": "login"
+          }}
         ]
       }}
     }}
   }}
 }}
 
-ADDITIONAL GUIDELINES:
-• Page slugs and action slugs must be lowercase, use underscore, no spaces.
-• If actions belong to a flow (OTP, Login), create separate pages (otp_verification, login, register) rather than dumping everything into a single page.
-• Keep components order logical: inputs first, then action buttons.
-• If a field looks like email/mobile/password, use respective inputType.
-• If an action implies a secondary modal (edit/delete), still represent it as a button component with proper action slug.
-• Keep pages minimal and user-friendly: split complex admin modules into a "list" page plus "detail/edit" page.
+GUIDELINES:
+• Login flow should have: login, otp_verification, register, forgot_password.
+• Customer modules should have: profile, address_list, order_history, wallet, favorites, etc.
+• Make pages meaningful, not a single dump of all fields.
+• Use logical grouping: inputs first → buttons last.
+• Use correct input types.
 
 PROJECT:
 {project_json}
 """
-
-
-
 
 
 # -------------------------------------------------------------------
@@ -114,22 +118,48 @@ def generate_wireframe_ai_sync(project: Dict[str, Any]) -> Dict[str, Any]:
         project_json=json.dumps(safe_project, indent=2)
     )
 
+    # --------------------------------------------------
+    # DEBUG — Print FINAL prompt sent to LLaMA
+    # --------------------------------------------------
+    print("\n================ LLaMA PROMPT SENT =================\n")
+    print(prompt)
+    print("\n====================================================\n")
+
     payload = {
         "model": OLLAMA_MODEL,
         "prompt": prompt,
-        "stream": False,
-        "max_tokens": 2000
+        "stream": False
     }
 
     # --- CALL LLaMA ---
     try:
         resp = requests.post(f"{OLLAMA_URL}/api/generate", json=payload, timeout=120)
         body = resp.json()
-        raw = body.get("output") or body.get("response") or json.dumps(body)
 
-    except Exception:
+        # LLaMA returns either:
+        # { "response": "text" }
+        # { "output": "text" }
+        raw = body.get("response") or body.get("output") or ""
+
+        # If streaming chunks came as list
+        if isinstance(raw, list):
+            raw = "".join(
+                chunk.get("response", "") 
+                for chunk in raw 
+                if isinstance(chunk, dict)
+            )
+
+    except Exception as e:
         logger.error("❌ AI request failed, using fallback UI")
+        print("AI ERROR:", e)
         return fallback_ui(project)
+
+    # --------------------------------------------------
+    # DEBUG — Print EXACT RAW AI TEXT
+    # --------------------------------------------------
+    print("\n================ RAW LLaMA OUTPUT =================\n")
+    print(raw)
+    print("\n===================================================\n")
 
     # --- PARSE JSON ---
     wf = safe_json_extract(str(raw))
@@ -137,15 +167,18 @@ def generate_wireframe_ai_sync(project: Dict[str, Any]) -> Dict[str, Any]:
         logger.error("❌ AI returned invalid JSON → fallback UI")
         return fallback_ui(project)
 
-    # --- NORMALIZE INPUT KEYS ---
-    for page in wf.get("pages", {}).values():
-        for c in page.get("components", []):
-            if "input_type" in c:
-                c["inputType"] = c.pop("input_type")
-            if "inputtype" in c:
-                c["inputType"] = c.pop("inputtype")
-            if "input-type" in c:
-                c["inputType"] = c.pop("input-type")
+    # --------------------------------------------------
+    # NORMALIZE INPUT TYPES
+    # --------------------------------------------------
+    for module_slug, module_pages in wf.get("pages", {}).items():
+        for page_slug, page in module_pages.items():
+            for c in page.get("components", []):
+                if "input_type" in c:
+                    c["inputType"] = c.pop("input_type")
+                if "inputtype" in c:
+                    c["inputType"] = c.pop("inputtype")
+                if "input-type" in c:
+                    c["inputType"] = c.pop("input-type")
 
     return wf
 
@@ -158,10 +191,10 @@ def fallback_ui(project: Dict[str, Any]) -> Dict[str, Any]:
     pages = {}
 
     for mod in project.get("modules", []):
-        pid = slugify(mod["name"])
+        module_slug = slugify(mod["name"])
 
         inputs = [
-            {"type": "input", "label": f, "inputType": "text"}
+            {"type": "input", "label": f, "inputType": "text", "name": slugify(f)}
             for f in mod.get("fields", [])
         ]
 
@@ -170,13 +203,15 @@ def fallback_ui(project: Dict[str, Any]) -> Dict[str, Any]:
             for a in mod.get("actions", [])
         ]
 
-        pages[pid] = {
-            "title": mod["name"],
-            "components": inputs + buttons
+        pages[module_slug] = {
+            "main": {
+                "title": mod["name"],
+                "description": "",
+                "components": inputs + buttons
+            }
         }
 
-    return { "pages": pages }
-
+    return {"pages": pages}
 
 # -------------------------------------------------------------------
 # ASYNC WRAPPER

@@ -310,6 +310,8 @@ async def generate_wireframe(project_id: str = Form(...)):
     try:
         ai_wireframe = await generate_wireframe_ai(project)
         wf = ai_wireframe
+        if not wf or "pages" not in wf or not isinstance(wf["pages"], dict):
+           return {"success": False, "error": "Invalid AI output from AI"}
         
         nav = []
         for mod in project.get("modules", []):
