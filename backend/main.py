@@ -92,6 +92,8 @@ def parse_synopsis(text: str):
 # 📡 API: Upload & Save Synopsis
 # =============================================================================
 from services.project_parser import llama_structured_project
+from services.ai_agent import generate_wireframe_ai
+
 
 @app.post("/api/upload-synopsis")
 async def upload_synopsis(
@@ -215,6 +217,7 @@ async def upload_synopsis(
         "message": "Project parsed & saved successfully with AI 🧠",
         "project_id": str(project_id),
         "project": project_clean
+        
     }
 
 # =============================================================================
@@ -234,6 +237,7 @@ async def get_latest_project():
     Used in frontend step: 'Confirm Synopsis'
     """
     print("\n📦 [API CALL] /api/get-latest-project -----------------------------------")
+    
 
     try:
         # ✅ If collection is async (Motor), await find_one()
@@ -289,99 +293,108 @@ async def update_project(project_id: str = Form(...), project: str = Form(...)):
 # 🧱 API: Generate FULL Wireframe (using LLAMA Big-Call)
 # =============================================================================
 @app.post("/api/generate-wireframe")
+
+# Replace the existing generate_wireframe handler with this function
+
+@app.post("/api/generate-wireframe")
 async def generate_wireframe(project_id: str = Form(...)):
-    from services.ai_agent import generate_wireframe_ai
-    from bson import ObjectId
-
-    print("\n🤖 [AI AGENT] Generating FULL wireframe via LLaMA...")
-
-    # ------------------------------------------------------------
-    # STEP 1: Fetch project from DB
-    # ------------------------------------------------------------
     project = await get_project(project_id)
+    
     if not project:
         return {"success": False, "error": "Project not found"}
 
-    print(f"📦 [DB] Retrieved project: {project.get('title')}")
-
-    # ------------------------------------------------------------
-    # STEP 2: Ask LLaMA to generate FULL UI JSON
-    # ------------------------------------------------------------
     try:
-        ai_wireframe = await generate_wireframe_ai(project)
-        wf = ai_wireframe
-        if not wf or "pages" not in wf or not isinstance(wf["pages"], dict):
-           return {"success": False, "error": "Invalid AI output from AI"}
-        
-        nav = []
-        for mod in project.get("modules", []):
-            slug = re.sub(r"[^a-zA-Z0-9]+", "-", mod["name"]).lower()
-            nav.append({
-                "id": slug,
-                "label": mod["name"],
-                "path": f"/{slug}"
-            })
-                
-        wireframe_clean = {
-           "layout_type": project.get("ui_layout", "sidebar"),
-           "color_scheme": project.get("ui_color_scheme", "blue"),
-           "primary_color": project.get("ui_primary_color", "#4361ee"),
-           "app_name": project.get("title", "Application"),
+        print("Generating Wireframe (AI)...")
+        html_output = await generate_wireframe_ai(project)
+        print("raw html_output length:", len(str(html_output)) if html_output is not None else 0)
 
-           "navigation": nav,
-           "pages": wf.get("pages", {})
-        }
-    except Exception as e:
-        print("❌ [AI ERROR]:", e)
-        import traceback
-        traceback.print_exc()
-        return {
-            "success": False,
-            "error": "AI wireframe generation failed",
-            "detail": str(e)
-        }
+        # Basic sanitization: remove <script>...</script>...
+        if isinstance(html_output, str):
+           safe_html = re.sub(
+           r"<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>",
+            "",
+           html_output,
+           flags=re.IGNORECASE
+           )
+        else:
+             safe_html = str(html_output)
 
-    # LLaMA must return dictionary
-    if not isinstance(ai_wireframe, dict):
-        print("❌ Invalid wireframe returned by LLaMA")
-        return {
-            "success": False,
-            "error": "Invalid wireframe JSON returned by AI",
-            "raw_output": str(ai_wireframe)
-        }
+        # Validate HTML
+        if not isinstance(safe_html, str) or "<html" not in safe_html.lower():
+              return {
+        "success": False,
+        "error": "Invalid HTML output from AI",
+        "raw": str(html_output)
+    }
 
-    print("🎨 [AI] Full wireframe generated successfully")
 
-    # ------------------------------------------------------------
-    # STEP 3: Save wireframe to MongoDB
-    # ------------------------------------------------------------
-    try:
-        oid = ObjectId(project_id)
+        # STEP 3: Save sanitized HTML to MongoDB (update wireframe_html + status)
         await collection.update_one(
-          {"_id": oid},
-          {"$set": {
-            "wireframe": wireframe_clean,
-            "status": "wireframe_generated",
-            "updated_at": datetime.utcnow().isoformat()
-           }}
+            {"_id": ObjectId(project_id)},
+            {"$set": {
+                "wireframe_html": safe_html,
+                "status": "wireframe_html_generated",
+                "updated_at": datetime.utcnow().isoformat()
+            }}
         )
-        print("✅ Wireframe saved to DB")
+
+        # STEP 4: Optionally update the wireframe object inside project (if you want)
+        # If your AI also returns a structured 'wireframe' JSON, you can set it here.
+        # For now we keep existing wireframe object unchanged (frontend will read project.wireframe or project.ui_*).
+
     except Exception as e:
-        print("❌ [DB ERROR]:", e)
-        return {
-            "success": False,
-            "error": f"Database save error: {str(e)}"
+        print("❌ [generate_wireframe ERROR]", e)
+        return {"success": False, "error": "AI wireframe generation failed", "detail": str(e)}
+
+    # STEP 5: Fetch the latest project doc and return a cleaned version for frontend
+    try:
+        updated_project = await get_project(project_id)
+        if not updated_project:
+            # Shouldn't happen, but guard anyway
+            return {"success": True, "project_id": project_id, "title": project.get("title", ""), "html": safe_html}
+        
+        # Convert ObjectId -> str and other non-serializable types
+        project_json = json.loads(json.dumps(updated_project, cls=MongoJSONEncoder))
+
+        # Create a cleaned project object tailored for the frontend (only include safe fields)
+        project_clean = {
+            "title": project_json.get("title", ""),
+            "description": project_json.get("description", ""),
+            "features": project_json.get("features", []),
+            "modules": project_json.get("modules", []),
+            "tech_stack": project_json.get("tech_stack", []),
+            "target_platform": project_json.get("target_platform", "Web"),
+            "ai_summary": project_json.get("ai_summary", ""),
+            # include UI root fields so frontend can safely read data.project.ui_*
+            "ui_layout": project_json.get("ui_layout"),
+            "ui_color_scheme": project_json.get("ui_color_scheme"),
+            "ui_primary_color": project_json.get("ui_primary_color"),
+            # include wireframe object (if present)
+            "wireframe": project_json.get("wireframe", {}),
+            # include wireframe_html? only if you want frontend to access it from project (we already return 'html')
+            # "wireframe_html": project_json.get("wireframe_html")
         }
 
-    # ------------------------------------------------------------
-    # STEP 4: Send response to frontend
-    # ------------------------------------------------------------
+    except Exception as e:
+        print("⚠️ [fetch updated project ERROR]:", e)
+        # Fallback: still return the HTML but warn frontend project may be stale
+        return {
+            "success": True,
+            "project_id": project_id,
+            "title": project.get("title"),
+            "html": safe_html,
+            "warning": "Could not fetch updated project after saving: " + str(e)
+        }
+
+    # Final response: include success, html, and cleaned project payload
     return {
         "success": True,
         "project_id": project_id,
         "title": project.get("title"),
-        "wireframe": wireframe_clean
+        "html": safe_html,
+        "project": project_clean
     }
+
 
 
 # =============================================================================
