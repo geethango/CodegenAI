@@ -906,69 +906,72 @@
                     <p>Based on your project description, we've generated a UI wireframe. You can customize it below:
                     </p>
 
-                    <div class="wireframe-container" id="wireframe-container" style="display:none;">
+                   <div class="wireframe-container" id="wireframe-container" style="display:none;">
 
-                        <!-- LEFT SIDE: PREVIEW -->
-                        <div class="wireframe-preview">
-                            <h4>Wireframe Preview</h4>
-                            <div class="wireframe-box"></div>
-                        </div>
+    <!-- LEFT SIDE: PREVIEW -->
+    <div class="wireframe-preview">
+        <h4>Wireframe Preview</h4>
 
-                        <!-- RIGHT SIDE: CUSTOMIZATION -->
-                        <div class="wireframe-edit">
-                            <h4>Customize Wireframe</h4>
+        <!-- keep the old renderer but give it an id for toggling -->
+        <div class="wireframe-box" id="wireframe-box"></div>
 
-                            <div class="edit-controls">
+        <!-- iframe for full-page HTML returned by backend -->
+        <!-- sandbox WITHOUT allow-scripts to block JS inside the returned page -->
+        <iframe id="wireframe-iframe"
+                style="width:100%;height:480px;border:1px solid #ddd;border-radius:8px;margin-top:12px;display:none;"
+                sandbox="allow-scripts allow-same-origin allow-forms"
+                title="Wireframe HTML preview"></iframe>
+    </div>
 
-                                <div class="edit-control">
-                                    <label for="layout-type">Layout Type</label>
-                                    <select id="layout-type">
-                                        <option value="sidebar">Sidebar Layout</option>
-                                        <option value="topnav">Top Navigation</option>
-                                        <option value="dashboard">Dashboard</option>
-                                        <option value="mobile">Mobile App</option>
-                                    </select>
-                                </div>
+    <!-- RIGHT SIDE: CUSTOMIZATION -->
+    <div class="wireframe-edit">
+        <h4>Customize Wireframe</h4>
+        <div class="edit-controls">
+            <div class="edit-control">
+                <label for="layout-type">Layout Type</label>
+                <select id="layout-type">
+                    <option value="sidebar">Sidebar Layout</option>
+                    <option value="topnav">Top Navigation</option>
+                    <option value="dashboard">Dashboard</option>
+                    <option value="mobile">Mobile App</option>
+                </select>
+            </div>
 
-                                <div class="edit-control">
-                                    <label for="color-scheme">Color Scheme</label>
-                                    <select id="color-scheme">
-                                        <option value="blue">Blue</option>
-                                        <option value="green">Green</option>
-                                        <option value="purple">Purple</option>
-                                        <option value="dark">Dark</option>
-                                        <option value="orange">Orange</option>
-                                        <option value="yellow">Yellow</option>
-                                        <option value="pink">Pink</option>
-                                        <option value="teal">Teal</option>
-                                    </select>
-                                </div>
+            <div class="edit-control">
+                <label for="color-scheme">Color Scheme</label>
+                <select id="color-scheme">
+                    <option value="blue">Blue</option>
+                    <option value="green">Green</option>
+                    <option value="purple">Purple</option>
+                    <option value="dark">Dark</option>
+                    <option value="orange">Orange</option>
+                    <option value="yellow">Yellow</option>
+                    <option value="pink">Pink</option>
+                    <option value="teal">Teal</option>
+                </select>
+            </div>
 
-                                <div class="edit-control">
-                                    <label for="primary-color">Primary Color</label>
-                                    <input type="color" id="primary-color" value="#4361ee">
-                                </div>
+            <div class="edit-control">
+                <label for="primary-color">Primary Color</label>
+                <input type="color" id="primary-color" value="#4361ee">
+            </div>
 
+            <div class="edit-control">
+                <label>Modules</label>
+                <select id="moduleSelect"></select>
+            </div>
+        </div>
 
+        <button class="btn btn-primary" id="update-wireframe-btn">
+            <i class="fas fa-sync-alt"></i> Update Wireframe
+        </button>
 
-                                <div class="edit-control">
-                                    <label>Modules</label>
-                                    <select id="moduleSelect"></select>
-                                </div>
-
-                            </div>
-
-                            <button class="btn btn-primary" id="update-wireframe-btn">
-                                <i class="fas fa-sync-alt"></i> Update Wireframe
-                            </button>
-
-                            <div id="updateLoader"
-                                style="display:none; margin-top:10px; font-weight:600; color:#6b46c1;">
-                                Updating wireframe… Please wait...
-                            </div>
-
-                        </div> <!-- END EDIT -->
-                    </div> <!-- END CONTAINER -->
+        <div id="updateLoader"
+            style="display:none; margin-top:10px; font-weight:600; color:#6b46c1;">
+            Updating wireframe… Please wait...
+        </div>
+    </div> <!-- END EDIT -->
+</div> <!-- END CONTAINER -->
 
                 </div> <!-- END BODY CONTENT -->
 
@@ -1679,6 +1682,43 @@
                 });
 
                 const data = await res.json();
+                // ✅ Display project title safely
+if (data.project?.title) {
+document.getElementById("p-title").textContent = data.project.title;
+}
+
+// Optional: show title in header
+const header = document.getElementById("project-title-header");
+if (header && data.project?.title) {
+    header.textContent = data.project.title;
+}
+
+                const iframe = document.getElementById("wireframe-iframe");
+                const wireBox = document.getElementById("wireframe-box");
+
+                if (data && typeof data.html === "string" && data.html.trim()) {
+                // Prefer srcdoc (isolated). Keep sandbox WITHOUT allow-scripts by default.
+                if (iframe) {
+                   iframe.style.display = "block";
+                try {
+                       iframe.srcdoc = data.html;
+                } catch (e) {
+                // fallback for older browsers
+                try {
+                const doc = iframe.contentWindow.document;
+                doc.open();
+                doc.write(data.html);
+                doc.close();
+                } catch (err) {
+                console.warn("iframe write failed:", err);
+      }
+    }
+  }
+  if (wireBox) wireBox.style.display = "none";
+} else {
+  if (iframe) iframe.style.display = "none";
+  if (wireBox) wireBox.style.display = "block";
+}
 
                 if (!data.success) {
                     alert("Wireframe generation failed.");
@@ -1748,27 +1788,27 @@
                 const layoutSelect = document.getElementById("layout-type");
                 if (layoutSelect) {
                     layoutSelect.value =
-                        w.layout_type ||
-                        data.project.ui_layout ||        // ← NEW!
-                        lastWireframe.layout_type ||
+                       w.layout_type ??
+                       projectCache?.ui_layout ??
+                       lastWireframe?.layout_type ?? 
                         "sidebar";
                 }
 
                 const colorSelect = document.getElementById("color-scheme");
                 if (colorSelect) {
                     colorSelect.value =
-                        w.color_scheme ||
-                        data.project.ui_color_scheme ||  // ← NEW!
-                        lastWireframe.color_scheme ||
+                        w.color_scheme ??
+                        projectCache?.ui_color_scheme ??
+                        lastWireframe?.color_scheme ??
                         "blue";
                 }
 
                 const primaryInput = document.getElementById("primary-color");
                 if (primaryInput) {
                     primaryInput.value =
-                        w.primary_color ||
-                        data.project.ui_primary_color || // ← NEW!
-                        lastWireframe.primary_color ||
+                         w.primary_color ??
+                         projectCache?.ui_primary_color ??
+                         lastWireframe?.primary_color ??
                         "#4361ee";
                 }
 
@@ -1903,20 +1943,31 @@
             preview.style.boxShadow = `0px 0px 10px ${primary}33`;
             preview.innerHTML = "";
 
-            const pages = w.pages || {};
-            // FIX: match navigation ID to pages EXACTLY
-            const currId = selectedWireframePage || Object.keys(pages)[0];
+           // pages might be empty — always guard it
+const pages = w.pages || {};
 
-            // If backend key has _ but nav has -, convert nav → backend format
-            const fixedId = currId.replace(/-/g, "_");
+// find a valid ID
+let currId = selectedWireframePage;
 
-            const [moduleSlug, pageSlug] = selectedWireframePage.split("|");
-            const page = pages[moduleSlug]?.[pageSlug];
+// fallback: try to use navigation ID
+if (!currId && w.navigation?.length) {
+    currId = w.navigation[0].id;
+}
 
-            if (!page) {
-                preview.innerHTML = "<p>No module selected</p>";
-                return;
-            }
+// fallback: first page key
+if (!currId) {
+    const firstModule = Object.keys(pages)[0];
+    if (firstModule) {
+        const firstPage = Object.keys(pages[firstModule] || {})[0];
+        if (firstPage) currId = `${firstModule}|${firstPage}`;
+    }
+}
+
+// FINAL fallback: avoid undefined
+if (!currId) currId = "";
+
+// SAFE replace — only if string is non-empty
+const idToUse = currId ? currId.replace(/-/g, "_") : "";
 
             // ---------- BUILD PAGE CONTENT ----------
             let pageHTML = `<h2 style="margin-bottom:20px;">${page.title}</h2>`;
