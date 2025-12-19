@@ -919,7 +919,7 @@
         <!-- sandbox WITHOUT allow-scripts to block JS inside the returned page -->
         <iframe id="wireframe-iframe"
                 style="width:100%;height:480px;border:1px solid #ddd;border-radius:8px;margin-top:12px;display:none;"
-                sandbox="allow-scripts allow-same-origin allow-forms"
+                sandbox="allow-scripts "
                 title="Wireframe HTML preview"></iframe>
     </div>
 
@@ -1701,24 +1701,44 @@ if (header && data.project?.title) {
                 if (iframe) {
                    iframe.style.display = "block";
                 try {
-                       iframe.srcdoc = data.html;
-                } catch (e) {
-                // fallback for older browsers
-                try {
-                const doc = iframe.contentWindow.document;
-                doc.open();
-                doc.write(data.html);
-                doc.close();
-                } catch (err) {
-                console.warn("iframe write failed:", err);
-      }
+                       
+                      iframe.srcdoc = data.html;
+
+iframe.onload = () => {
+  const doc = iframe.contentDocument;
+  if (!doc) return;
+
+  // Remove <base> tag if present
+  const base = doc.querySelector("base");
+  if (base) base.remove();
+
+  // Smooth scrolling
+  const style = doc.createElement("style");
+  style.textContent = `
+    html {
+      scroll-behavior: smooth;
     }
-  }
-  if (wireBox) wireBox.style.display = "none";
-} else {
-  if (iframe) iframe.style.display = "none";
-  if (wireBox) wireBox.style.display = "block";
-}
+  `;
+  doc.head.appendChild(style);
+
+  // 🔒 Handle navigation INSIDE iframe only
+  doc.addEventListener("click", e => {
+    const link = e.target.closest("a");
+    if (!link) return;
+
+    const href = link.getAttribute("href");
+    if (!href || !href.startsWith("#")) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    const targetId = href.slice(1);
+    const target = doc.getElementById(targetId);
+    if (!target) return;
+
+    target.scrollIntoView({ behavior: "smooth" });
+  });
+};
 
                 if (!data.success) {
                     alert("Wireframe generation failed.");
@@ -1788,28 +1808,26 @@ if (header && data.project?.title) {
                 const layoutSelect = document.getElementById("layout-type");
                 if (layoutSelect) {
                     layoutSelect.value =
-                       w.layout_type ??
-                       projectCache?.ui_layout ??
-                       lastWireframe?.layout_type ?? 
-                        "sidebar";
+                    w.layout_type ??
+                    lastWireframe?.layout_type ??
+                    "sidebar";
                 }
 
                 const colorSelect = document.getElementById("color-scheme");
                 if (colorSelect) {
                     colorSelect.value =
-                        w.color_scheme ??
-                        projectCache?.ui_color_scheme ??
-                        lastWireframe?.color_scheme ??
-                        "blue";
+                    w.color_scheme ??
+                    lastWireframe?.color_scheme ??
+                    "blue";
+
                 }
 
                 const primaryInput = document.getElementById("primary-color");
                 if (primaryInput) {
                     primaryInput.value =
-                         w.primary_color ??
-                         projectCache?.ui_primary_color ??
-                         lastWireframe?.primary_color ??
-                        "#4361ee";
+  w.primary_color ??
+  lastWireframe?.primary_color ??
+  "#4361ee";
                 }
 
 
@@ -1817,6 +1835,13 @@ if (header && data.project?.title) {
                 // Render Preview (uses the robust renderer below)
                 renderAIWireframePreview(w);
 
+                } catch (err) {
+                    console.warn("iframe write failed:", err);
+                }   // ✅ closes inner try (⑤)
+            }       // ✅ closes if (iframe) (④)
+        }           // ✅ closes if (data.html) (③)
+
+                
             } catch (err) {
                 console.error("Wireframe Error:", err);
                 alert("Error generating wireframe.");
@@ -1969,7 +1994,17 @@ if (!currId) currId = "";
 // SAFE replace — only if string is non-empty
 const idToUse = currId ? currId.replace(/-/g, "_") : "";
 
+// ---------- RESOLVE PAGE SAFELY ----------
+let page = { title: "", components: [] };
+
+if (currId && currId.includes("|")) {
+    const [moduleSlug, pageSlug] = currId.split("|");
+    page = pages?.[moduleSlug]?.[pageSlug] || page;
+}
+            
+
             // ---------- BUILD PAGE CONTENT ----------
+
             let pageHTML = `<h2 style="margin-bottom:20px;">${page.title}</h2>`;
 
             (page.components || []).forEach(c => {

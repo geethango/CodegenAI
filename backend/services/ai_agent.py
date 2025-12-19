@@ -2,100 +2,76 @@
 # services/ai_agent.py
 # =============================================================================
 
-import json
-import logging
-import requests
 from typing import Dict, Any
+import logging
+import json
+
+from services.gemini_client import call_gemini
+from services.wireframe_prompt import build_wireframe_prompt
+from services.api_prompt import build_api_prompt
 
 logger = logging.getLogger("ui_agent")
-logger.setLevel(logging.INFO)
-
-if not logger.handlers:
-    ch = logging.StreamHandler()
-    ch.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
-    logger.addHandler(ch)
 
 
-# -------------------------------------------------------------------
-# OLLAMA CONFIG
-# -------------------------------------------------------------------
-OLLAMA_URL = "http://localhost:11434"
-OLLAMA_MODEL = "llama3.2:3b"
+# -----------------------------------------------------------------------------
+# 🧱 WIREframe GENERATION (UNCHANGED)
+# -----------------------------------------------------------------------------
+def generate_wireframe_ai_sync(project: Dict[str, Any]) -> str:
+    logger.info("⚡ Generating wireframe HTML for project: %s", project.get("title"))
+
+    prompt = build_wireframe_prompt(project)
+    raw_output = call_gemini(prompt)
+
+    raw_lower = raw_output.lower()
+    if "<!doctype" in raw_lower or "<html" in raw_lower:
+        return raw_output
+
+    # Safety fallback
+    return f"<!DOCTYPE html><html><body>{raw_output}</body></html>"
 
 
-# -------------------------------------------------------------------
-# PROMPT → GENERATE CLEAN HTML UI/UX PREVIEW
-# -------------------------------------------------------------------
-PROMPT_TEMPLATE = """
-You are a Senior UI/UX Engineer.
-
-TASK:
-- Convert the following project JSON into a single HTML wireframe.
-- Use clean and minimal HTML5 + inline CSS only (no JS, no external libraries).
-- The output must be ONE HTML file.
-- Create a separate <section> for each module and page in the JSON.
-- Each page should contain only clean form fields (input, textarea, select).
-- Include standard pages if missing: Login, Register, Dashboard, Logout.
-- Use simple neutral layout: 
-    - max-width: 700px
-    - margin: 20px auto
-    - font-family: Arial
-    - minimal borders
-- Do NOT add sample data or dummy text.
-- Do NOT skip any module/page from the JSON.
-- Do NOT add advanced UI elements. Keep everything basic.
-- Produce ONLY pure HTML output. No markdown. No explanations. No comments.
+async def generate_wireframe_ai(project: Dict[str, Any]) -> str:
+    return generate_wireframe_ai_sync(project)
 
 
-PROJECT JSON:
-{{project_json}}
-"""
+# -----------------------------------------------------------------------------
+# 🔒 SAFE JSON EXTRACTION (NEW – CRITICAL)
+# -----------------------------------------------------------------------------
+def extract_json_from_text(text: str) -> Dict[str, Any]:
+    """
+    Extract first valid JSON object from Gemini output
+    """
+    start = text.find("{")
+    end = text.rfind("}") + 1
 
-# -------------------------------------------------------------------
-# MAIN GENERATOR (SYNC)
-# -------------------------------------------------------------------
-def generate_wireframe_ai_sync(project: Dict[str, Any]) -> Dict[str, Any]:
+    if start == -1 or end == -1:
+        raise ValueError("No JSON object found in Gemini response")
 
-    logger.info("⚡ Generating HTML UI preview for project: %s", project.get("title"))
+    json_str = text[start:end]
+    return json.loads(json_str)
 
-    prompt = PROMPT_TEMPLATE.format(
-        project_json=json.dumps(project, indent=2)
-    )
-    #print("json",json.dumps(project, indent=2))
-    payload = {
-        "model": OLLAMA_MODEL,
-        "prompt": prompt,
-        "stream": False
-    }
 
+# -----------------------------------------------------------------------------
+# 🚀 API GENERATION FROM UI INTENT (FIXED)
+# -----------------------------------------------------------------------------
+def generate_apis_from_ui_intent_sync(ui_intent: Dict[str, Any]) -> Dict[str, Any]:
+    logger.info("🚀 Generating APIs from UI intent")
+
+    prompt = build_api_prompt(ui_intent)
+    raw_output = call_gemini(prompt)
+    print("-------Raw Output-------")
+    print(raw_output)
     try:
-        # Call Ollama
-        resp = requests.post(f"{OLLAMA_URL}/api/generate", json=payload)
-        body = resp.json()
-
-        # Extract model response
-        raw = body.get("response") or body.get("output") or ""
-
-        print("\n===== RAW OLLAMA OUTPUT =====")
-        print(raw)
-        print("===== END =====\n")
-
-        # Detect HTML content
-        if "<html" in raw.lower() or "<!doctype" in raw.lower():
-            return raw
-
-        # If model responds with just fragments, still return as HTML
-        return raw
+        api_spec = extract_json_from_text(raw_output)  # ✅ FIX
+        return api_spec
 
     except Exception as e:
-        logger.error(f"❌ AI request failed: {str(e)}")
-        return {
-            "html_preview": "<p style='color:red;'>AI failed to generate preview.</p>"
-        }
+        logger.error("❌ Gemini returned invalid JSON for API generation")
+        logger.error("---- RAW GEMINI OUTPUT ----")
+        logger.error(raw_output)
+        logger.error("---------------------------")
+        raise
 
 
-# -------------------------------------------------------------------
-# MAIN GENERATOR (ASYNC WRAPPER)
-# -------------------------------------------------------------------
-async def generate_wireframe_ai(project: Dict[str, Any]):
-    return generate_wireframe_ai_sync(project)
+async def generate_apis_from_ui_intent(ui_intent: Dict[str, Any]) -> Dict[str, Any]:
+    return generate_apis_from_ui_intent_sync(ui_intent)
